@@ -1,0 +1,205 @@
+---
+title: "Association Rule Mining and Twitter"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+# Twitter API Setup
+
+To access a Twitter API you will need to set up an account and receive a consumerKey, the comsumerSecret, the access_Token, and the access_Secret. A popular library and API: "twitteR".
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, results ='show',include=TRUE,messages=FALSE)
+
+####### Twitter in R
+#  Consumer API keys
+#  Access token & access token secret
+
+## I have created a text file that contains the
+## consumerKey, the comsumerSecret, the access_Token, and the access_Secret
+## They are comma seperated. 
+# Insert your consumerKey and consumerSecret below
+
+
+
+consumerKey='SiMslBfTdWEimvLweRDTTrZVH'
+consumerSecret='FoPYqK3uwpzutwE6G1RmQvPbRJ8RChFSLfIlgRAcFHjymKDzHh'
+access_Token='1084502204038479872-v2czQaDlMt9ikoLnxhiQYk8Yb3f0RT'
+access_Secret='U9ktzvd5rEwcK13mttsgwAujS0VxNPtJstxXcEE5znnid'
+```
+
+Once you have your keys, you can set up the API.
+
+```{r api, include=TRUE}
+
+requestURL='https://api.twitter.com/oauth/request_token'
+accessURL='https://api.twitter.com/oauth/access_token'
+authURL='https://api.twitter.com/oauth/authorize'
+
+### NOTES: rtweet is another excellent option
+## https://mkearney.github.io/blog/2017/06/01/intro-to-rtweet/
+### https://rtweet.info/
+
+### Install the needed packages...
+#install.packages("twitteR")
+#install.packages("ROAuth")
+# install.packages("rtweet")
+library(arules)
+library(rtweet)
+library(twitteR)
+library(ROAuth)
+library(jsonlite)
+#install.packages("streamR")
+#library(streamR)
+#install.packages("rjson")
+library(rjson)
+#install.packages("tokenizers")
+library(tokenizers)
+library(tidyverse)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+#install.packages("syuzhet")  ## sentiment analysis
+library(syuzhet)
+library(stringr)
+#install.packages("arulesViz")
+library(arulesViz)
+
+```
+
+# Collecting Tweets
+
+Next we will set up the API and search for a particular hash tag. We will store the tweets with the designated hash in a csv file for safe keeping. Here, we choose "#Trump" in hopes to get a 100 tweets easily. 
+
+```{r tweets, include=TRUE}
+##############  Using twittR ##########################################################
+setup_twitter_oauth(consumerKey,consumerSecret,access_Token,access_Secret)
+
+Search<-twitteR::searchTwitter("nfl",n=100,since="2019-10-19")
+Search_DF <- twListToDF(Search)
+TransactionTweetsFile = "Choc.csv"
+Search_DF$text[1]
+
+
+## Start the file
+Trans <- file(TransactionTweetsFile)
+## Tokenize to words 
+Tokens<-tokenizers::tokenize_words(Search_DF$text[1],stopwords = stopwords::stopwords("en"), 
+          lowercase = TRUE,  strip_punct = TRUE, strip_numeric = TRUE,simplify = TRUE)
+## Write squished tokens
+cat(unlist(str_squish(Tokens)), "\n", file=Trans, sep=",")
+close(Trans)
+
+## Append remaining lists of tokens into file
+## Recall - a list of tokens is the set of words from a Tweet
+Trans <- file(TransactionTweetsFile, open = "a")
+for(i in 2:nrow(Search_DF)){
+  Tokens<-tokenize_words(Search_DF$text[i],stopwords = stopwords::stopwords("en"), 
+            lowercase = TRUE,  strip_punct = TRUE, simplify = TRUE)
+  cat(unlist(str_squish(Tokens)), "\n", file=Trans, sep=",")
+}
+close(Trans)
+
+```
+
+
+# Tweets as Transactions
+
+In this section we will read in the tweets stored in the CSV file using the (Association Rule Mining) ARM library. Each tweet will be considered a basket of words. We can use ARM to determine associations of words in tweets. 
+
+```{r baskets, include=TRUE}
+
+######### Read in the tweet transactions
+TweetTrans <- read.transactions(TransactionTweetsFile,
+                                rm.duplicates = FALSE, 
+                                format = "basket",
+                                sep=","
+                                ## cols = 
+                                )
+inspect(head(TweetTrans))
+## See the words that occur the most
+Sample_Trans <- sample(TweetTrans, 50)
+summary(Sample_Trans)
+
+## Read the transactions data into a dataframe
+TweetDF <- read.csv(TransactionTweetsFile, header = FALSE, sep = ",")
+head(TweetDF)
+str(TweetDF)
+
+
+```
+
+## Cleaning the text data
+
+Note that cleaning the text data is very important in text mining applications. Tweets are especially "messy". We will remove "rt", "http", etc and any other strings of no importance. 
+
+```{r clean,  include=TRUE}
+
+## Convert all columns to char 
+TweetDF<-TweetDF %>%
+  mutate_all(as.character)
+str(TweetDF)
+# We can now remove certain words
+TweetDF[TweetDF == "t.co"] <- ""
+TweetDF[TweetDF == "rt"] <- ""
+TweetDF[TweetDF == "http"] <- ""
+TweetDF[TweetDF == "https"] <- ""
+
+## Clean with grepl - every row in each column
+MyDF<-NULL
+for (i in 1:ncol(TweetDF)){
+  MyList=c() # each list is a column of logicals ...
+  MyList=c(MyList,grepl("[[:digit:]]", TweetDF[[i]]))
+  MyDF<-cbind(MyDF,MyList)  ## create a logical DF
+  ## TRUE is when a cell has a word that contains digits
+}
+## For all TRUE, replace with blank
+TweetDF[MyDF] <- ""
+head(TweetDF,10)
+
+
+
+# Now we save the dataframe using the write table command 
+write.table(TweetDF, file = "UpdatedChocolate.csv", col.names = FALSE, 
+            row.names = FALSE, sep = ",")
+TweetTrans <- read.transactions("UpdatedChocolate.csv", sep =",", 
+            format("basket"),  rm.duplicates = TRUE)
+inspect(head(TweetTrans))
+
+```
+
+# ARM
+
+Next we will apply the apriori algorithm to find the associations including computing the support, confidence and lift. Read more on the arules library to tweak / tune the following code to achieve desired results. 
+
+```{r arm, include=TRUE}
+
+# So that you do not have an enormous amount of rules, you can thresholds for
+# support, confidence and lift ... also minlength for the rules. 
+TweetTrans_rules = arules::apriori(TweetTrans, 
+            parameter = list(support=.025, confidence=.75, minlen=3))
+inspect(head(TweetTrans_rules))
+## sorted
+SortedRules_conf <- sort(TweetTrans_rules, by="confidence", decreasing=TRUE)
+inspect(head(SortedRules_conf))
+
+SortedRules_sup <- sort(TweetTrans_rules, by="support", decreasing=TRUE)
+inspect(head(SortedRules_sup))
+```
+
+# Displaying Results
+
+The results will be displayed as an interactive graph.
+
+```{r graph, include=TRUE}
+plot (SortedRules_sup[1:50],method="graph",shading="confidence") 
+plot (SortedRules_conf[1:50],method="graph",shading="confidence") 
+
+plot (SortedRules_sup[1:50],method="graph",interactive=TRUE,shading="confidence") 
+plot (SortedRules_conf[1:50],method="graph",interactive=TRUE,shading="confidence") 
+
+```
+
+
