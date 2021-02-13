@@ -1,8 +1,8 @@
 ---
 title: "Association Rule Mining and Twitter"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
   word_document: default
 ---
 
@@ -62,7 +62,7 @@ library(plyr)
 library(dplyr)
 library(ggplot2)
 #install.packages("syuzhet")  ## sentiment analysis
-library(syuzhet)
+#library(syuzhet)
 library(stringr)
 #install.packages("arulesViz")
 library(arulesViz)
@@ -77,9 +77,9 @@ Next we will set up the API and search for a particular hash tag. We will store 
 ##############  Using twittR ##########################################################
 setup_twitter_oauth(consumerKey,consumerSecret,access_Token,access_Secret)
 
-Search<-twitteR::searchTwitter("nfl",n=100,since="2019-10-19")
+Search<-twitteR::searchTwitter("nfl",n=100,since="2021-1-30")
 Search_DF <- twListToDF(Search)
-TransactionTweetsFile = "Choc.csv"
+TransactionTweetsFile = "tweetFile.csv"
 Search_DF$text[1]
 
 
@@ -179,7 +179,7 @@ Next we will apply the apriori algorithm to find the associations including comp
 # So that you do not have an enormous amount of rules, you can thresholds for
 # support, confidence and lift ... also minlength for the rules. 
 TweetTrans_rules = arules::apriori(TweetTrans, 
-            parameter = list(support=.025, confidence=.75, minlen=3))
+            parameter = list(support=.025, confidence=.45, minlen=3))
 inspect(head(TweetTrans_rules))
 ## sorted
 SortedRules_conf <- sort(TweetTrans_rules, by="confidence", decreasing=TRUE)
@@ -194,11 +194,11 @@ inspect(head(SortedRules_sup))
 The results will be displayed as an interactive graph.
 
 ```{r graph, include=TRUE}
-plot (SortedRules_sup[1:50],method="graph",shading="confidence") 
-plot (SortedRules_conf[1:50],method="graph",shading="confidence") 
+plot (SortedRules_sup[1:20],method="graph",shading="confidence") 
+plot (SortedRules_conf[1:20],method="graph",shading="confidence") 
 
-plot (SortedRules_sup[1:50],method="graph",interactive=TRUE,shading="confidence") 
-plot (SortedRules_conf[1:50],method="graph",interactive=TRUE,shading="confidence") 
+plot (SortedRules_sup[1:20],method="graph",interactive=TRUE,shading="confidence") 
+plot (SortedRules_conf[1:20],method="graph",interactive=TRUE,shading="confidence") 
 
 ```
 
