@@ -1,0 +1,222 @@
+---
+title: 'HW #5 Tips'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tm)
+library(stringr)
+library(wordcloud)
+library(stringi)
+library(Matrix)
+library(tidytext) 
+library(dplyr)
+library(ggplot2)
+library(factoextra)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+
+
+
+# Unused Libs
+#library(slam)
+#library(quanteda)
+#library(SnowballC)
+#library(arules)
+#library(proxy)
+#library(cluster)
+#library(Cairo)
+#library(CORElearn)
+#library(mclust) 
+#library(plyr) 
+#library(proxy)
+
+
+```
+
+# Load the data
+
+In this example, we loaad the Fed Papers in Corpus format. Its always a good idea to peak at the data to be sure it has loaded correctly!!
+
+
+```{r}
+#Load Fed Papers Corpus
+FedPapersCorpus <- Corpus(DirSource("FedPapersCorpus"))
+(numberFedPapers<-length(FedPapersCorpus))
+## The following will show you that you read in all the documents
+(summary(FedPapersCorpus))
+(meta(FedPapersCorpus[[1]]))
+(meta(FedPapersCorpus[[1]],5))
+
+```
+
+# Cleaning and Preprocessing
+
+Choosing some good stop words can really go a long way to improve modeling results. There are also many other parameters one can tweak and tune using the DocumentTermMatrix function. See many below. 
+
+
+```{r}
+#Data Preparation and Transformation on Fed Papers
+##Remove punctuation,numbers, and space 
+(getTransformations())
+(nFedPapersCorpus<-length(FedPapersCorpus))
+##Ignore extremely rare words i.e. terms that appear in less then 1% of the documents
+(minTermFreq <-30)
+##Ignore overly common words i.e. terms that appear in more than 50% of the documents
+(maxTermFreq <-1000)
+(MyStopwords <- c("will","one","two", "may","less","publius","Madison","Alexand", "Alexander", "James", "Hamilton","Jay", "well","might","without","small", "single", "several", "but", "very", "can", "must", "also", "any", "and", "are", "however", "into", "almost", "can","for", "add", "Author" ))
+ 
+(STOPS <-stopwords('english'))
+Papers_DTM <- DocumentTermMatrix(FedPapersCorpus,
+                         control = list(
+                           stopwords = TRUE, 
+                           wordLengths=c(3, 15),
+                           removePunctuation = T,
+                           removeNumbers = T,
+                           tolower=T,
+                           stemming = T,
+                           remove_separators = T,
+                           stopwords = MyStopwords,
+                           removeWords=STOPS,
+                           removeWords=MyStopwords,
+                           bounds = list(global = c(minTermFreq, maxTermFreq))
+                         ))
+
+##inspect FedPapers Document Term Matrix (DTM)
+DTM <- as.matrix(Papers_DTM)
+#(DTM[1:11,1:10])
+
+
+```
+
+# Vectorization
+
+Vectorizing words is often done by encoding frequency information. Below we take a peak at the frequency of the words. Next some normalization techniques are tried. Which works best ... ?? Try many and assess the results!!! 
+
+
+```{r}
+
+
+##Look at word freuquncies
+WordFreq <- colSums(as.matrix(Papers_DTM))
+(head(WordFreq))
+(length(WordFreq))
+ord <- order(WordFreq)
+(WordFreq[head(ord)])
+(WordFreq[tail(ord)])
+## Row Sums per Fed Papers
+(Row_Sum_Per_doc <- rowSums((as.matrix(Papers_DTM))))
+
+## Create a normalized version of Papers_DTM
+Papers_M <- as.matrix(Papers_DTM)
+Papers_M_N1 <- apply(Papers_M, 1, function(i) round(i/sum(i),3))
+Papers_Matrix_Norm <- t(Papers_M_N1)
+
+
+## Convert to matrix and view
+Papers_dtm_matrix = as.matrix(Papers_DTM)
+#str(Papers_dtm_matrix)
+#(Papers_dtm_matrix[c(1:11),c(2:10)])
+
+```
+
+# Label the Data
+
+Below we label the data, prepare for modeling, and create some wordclouds for fun. 
+
+
+```{r}
+
+
+## Also convert to DF
+Papers_DF <- as.data.frame(as.matrix(Papers_Matrix_Norm))
+Papers_DF1<- Papers_DF%>%add_rownames()
+names(Papers_DF1)[1]<-"Author"
+Papers_DF1[1:11,1]="dispt"
+Papers_DF1[12:62,1]="hamil"
+Papers_DF1[63:85,1]="madis"
+head(Papers_DF1)
+
+#Wordcloud Visualization Hamilton, Madison and Disputed Papers
+DisputedPapersWC<- wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[11,])
+(head(sort(as.matrix(Papers_dtm_matrix)[11,], decreasing = TRUE), n=50))
+HamiltonPapersWC <-wordcloud(colnames(Papers_dtm_matrix),Papers_dtm_matrix[12:62,])
+MadisonPapersHW <-wordcloud(colnames(Papers_dtm_matrix), Papers_dtm_matrix[63:77,])
+
+```
+
+
+# Experimental Design
+
+Now that the data is labeled, its time to design an experiment. Below we randomly select a train and test set for validation using function:  sample.int() . 
+
+```{r}
+
+
+
+##Make Train and Test sets
+numDisputed = 11
+numTotalPapers = nrow(Papers_DF1)
+trainRatio <- .60
+set.seed(11) # Set Seed so that same sample can be reproduced in future also
+sample <- sample.int(n = numTotalPapers-numDisputed, size = floor(trainRatio*numTotalPapers), replace = FALSE)
+newSample = sample + numDisputed
+train <- Papers_DF1[newSample, ]
+test <- Papers_DF1[-newSample, ]
+# train / test ratio
+length(newSample)/nrow(Papers_DF1)
+
+```
+
+# Classification
+
+We are now ready to train and test using classifiers. Below we use a few different decision tree models. Try different params and prunings to get varied results. 
+
+Use fancyRpartPlot to visualize the learned tree models. What do these diagrams display???
+
+```{r}
+
+
+
+
+##Decision Tree Models 
+#Train Tree Model 1
+train_tree1 <- rpart(Author ~ ., data = train, method="class", control=rpart.control(cp=0))
+summary(train_tree1)
+#predict the test dataset using the model for train tree No. 1
+predicted1= predict(train_tree1, test, type="class")
+#plot number of splits
+rsq.rpart(train_tree1)
+plotcp(train_tree1)
+#plot the decision tree
+fancyRpartPlot(train_tree1)
+#confusion matrix to find correct and incorrect predictions
+table(Authorship=predicted1, true=test$Author)
+
+#Train Tree Model 2
+train_tree2 <- rpart(Author ~ upon + may + will + one, data = train, method="class", control=rpart.control(cp=0, minsplit = 2, maxdepth = 3))
+summary(train_tree2)
+#predict the test dataset using the model for train tree No. 1
+predicted2= predict(train_tree2, test, type="class")
+#plot number of splits
+rsq.rpart(train_tree2)
+plotcp(train_tree2)
+#plot the decision tree
+fancyRpartPlot(train_tree2)
+#confusion matrix to find correct and incorrect predictions
+table(Authorship=predicted2, true=test$Author)
+
+```
+
+
+
+
+
+
+
+
