@@ -1,0 +1,594 @@
+---
+title: "test"
+author: "Jeremy"
+date: "March 27, 2021"
+output: pdf_document
+---
+
+# Overview
+
+Linear regression provides a means to fit a line to represent the relationship shared between variables. If the true relationship is linear, then this learned linear function can be used as an accurate predictor. Another perspective ... Linear regression allows us to calculate the conditional mean of the outcome at _every_ value of the predictor variable(s). If the predictor takes on just a few values, then that's the number of conditional means that will be calculated. If the predictor is continuous and takes on a large number of values, we'statll still be able to calculate the conditional mean at every one of those values. 
+
+The model we posit for regression is as follows:
+
+$$Y=\beta_0+\beta_1 x_1 +\beta_2 x_2+ ... \beta_k x_k + \epsilon$$
+
+It's just a linear, additive model. Y increases or decreases as a function of x, with multiple x's included. $\epsilon$ is the extent to which an individual value is above or below the line created. 
+
+Let's say that you've got some student data and you want to target those students that may struggle in math. The intervention could be targeted based on what we know about students, much of which reflects broader inequalities in our education system, such as the relationship between SES and parental education and test scores. By intervening early we may help to reduce those inequalities. 
+
+We're going to be working with data on high school students from the Educational Longitudinal Study. Our goal will be to predict their math scores based on student characteristics. 
+
+```{r,echo=FALSE}
+
+library(tidyverse)
+library(forcats)
+library(ModelMetrics)
+library(modelr)
+```
+
+The ELS dataset is called `els_train`. I'll explain the "train" part in a bit-- it refers to a training dataset.
+
+```{r}
+load("els_train.Rdata")
+```
+
+## Bivariate regression
+
+Our dependent variable will be math scores, stored in this dataset as `bynels2m`. Let's take a look at this variable
+
+```{r}
+els_train%>%summarize(mean(bynels2m,na.rm=TRUE))
+
+gg<-ggplot(els_train,aes(x=bynels2m))
+gg<-gg+geom_histogram()
+gg
+```
+
+```{r}
+gg<-ggplot(els_train,aes(x=bynels2m))
+gg<-gg+geom_density()
+gg
+```
+
+
+This variable has a nice symmetric distribution. It looks approximately normal, which will help in interpreting the results. 
+
+```{r}
+
+#Model 1: simple bivariate regression
+
+mod1<-lm(bynels2m~byses1,data=els_train) #outcome on left, predictor on right 
+
+summary(mod1)
+confint(mod1)
+
+g1<-ggplot(els_train, aes(x=byses1,y=bynels2m))+ #specify data and x and y
+           geom_point(shape=1)+ #specify points
+           geom_smooth(method=lm) #ask for lm line
+g1
+
+els_train<-els_train%>%add_predictions(mod1)%>%dplyr::rename(pred1=pred) #predict using data in memory
+ 
+## RMSE
+rmse_1<-modelr::rmse(mod1,els_train);rmse_1
+
+```
+
+What this shows is that as socio-economic status increases, math scores are predicted to increase. For every one unit increase in SES, math scores are predicted to increase by \$`r prettyNum(mod1$coefficients[2],digits=0)`. The rmse of `r  prettyNum(rmse_1,digits=2)` gives us a sense of how wrong the model tends to be when using just this one predictor. 
+
+_Quick Exercise_ Run a regression using a different predictor. Calculate rmse and see if you can beat my score. 
+
+## Multiple Regression. 
+
+Okay, so we can see that this is somewhat predictive, but we can do better. Let's add in a second variable: the parent's level of education. 
+
+```{r}
+#Part 2: Multiple regression
+
+mod2<-lm(bynels2m~as.factor(bypared)+
+           byses1,
+          data=els_train)
+
+summary(mod2) 
+
+els_train<-els_train%>%add_predictions(mod2)%>%dplyr::rename(pred2=pred)
+
+rmse_2<-modelr::rmse(mod2,els_train); rmse_2
+
+```
+
+This finding reflects the basic inequity in our education system: lower income students score lower on math scores. This holds true even if we control for parental education. 
+
+_Quick Exercise_ Add another variable to your model from above and see what difference it makes. How is your RMSE? 
+
+## Transformations
+
+The `byses` variable is a little hard to interpret. It's on a scale from -2 to 2, which you should remember as the scale for a standardized variable or Z score. Let's transform it to be on a percentile scale from 0-100.
+
+```{r}
+els_train<-els_train%>%mutate(byses_p=percent_rank(byses1)*100)
+els_train%>%dplyr::summarize(mean(byses_p,na.rm=TRUE))
+```
+
+```{r}
+mod3<-lm(bynels2m~byses_p+
+         as.factor(bypared),
+         data=els_train
+         );summary(mod3)
+```
+
+This changes the coefficient AND its interpretation. Now, for every one percent increase in SES, math scores are predicted to increase by `r round(mod3$coefficients[2],2)`. Linear transformations will not change the statistical significance (t value), but non linear transformations like the one we just did will, as you can see. Does this change the RMSE? 
+
+```{r}
+rmse_3<-modelr::rmse(mod3,els_train)
+```
+ It looks like it actually increases it a bit. 
+
+## Testing and Training
+
+The essence of prediction is discovering the extent to which our models can predict outcomes for data that *does not come from our sample*. Many times this process is temporal. We fit a model to data from one time period, then take predictors from a subsequent time period to come up with a prediction in the future. For instance, we might use data on team performance to predict the likely winners and losers for upcoming soccer games. 
+
+This process does not have to be temporal. We can also have data that is out of sample because it hadn't yet been collected when our first data was collected, or we can also have data that is out of sample because we designated it as out of sample.
+
+The data that is used to generate our predictions is known as 
+*training* data. The idea is that this is the data used to train our model, to let it know what the relationship is between our predictors and our outcome. So far, we have only worked with training data. 
+
+That data that is used to validate our predictions is known as *testing* data. With testing data, we take our trained model and see how good it is at predicting outcomes using out of sample data. 
+
+One very simple approach to this would be to cut our data in half. We could then train our model on half the data, then test it on the other half. This would tell us whether our measure of model fit (e.g. rmse, auc) is similar or different when we apply our model to out of sample data. That's what we've done today: we have only been working with half of our data-- the training half. 
+
+The testing data (which is a random half of the original dataset) is stored as `els_test`. Since we transformed a variable in the training dataset, we'll need to do the same in the testing dataset. 
+
+```{r}
+load("els_test.Rdata")
+els_test<-els_test%>%mutate(byses_p=percent_rank(byses1)*100)
+```
+
+Now we can use the model we trained (model 3) on the testing data.
+
+```{r}
+## Generate a prediction from the testing dataset
+rmse_test_1<-modelr::rmse(mod1,els_test);rmse_test_1
+
+rmse_test_2<-modelr::rmse(mod2,els_test);rmse_test_2
+
+rmse_test_3<-modelr::rmse(mod3,els_test);rmse_test_3
+```
+
+Notice that this is different than the value for our training dataset. 
+
+## Thinking about regression for prediction
+
+You MUST remember: correlation is not causation. All you can pick up on using this tool is associations, or common patterns. You can't know whether one thing causes another. Remember that the left hand side variable could just as easily be on the right hand side. 
+
+
+
+
+
+# Scatterplots {#scatterplots}
+
+Scatterplots are a great way to present data that has a continuous response variable. When creating scatterplots, the idea is to show ALL of the data, and then show how your model is summarizing the relationships in that data. 
+
+
+## Setup
+The code for today starts with the normal set of preliminaries, opening up the `els.RData` dataset and creating a codebook. 
+
+```{r,echo=FALSE}
+
+
+library(modelr)
+
+load("els.Rdata")
+
+```
+
+## Bivariate Regression
+
+We begin with a simple model of test scores as a function of socio-economic status. 
+
+## Basics of Creating a Scatterplot
+
+Our first step should be to plot the data. Today, we'll be using the `ggplot2` library, which is a highly functional implementation of what's known as the grammar of graphics. In a very small nutshell, the grammar of graphics refers to laying out a graphic in a series of layers. For our first scatterplot, we first specify the data that we'll be drawing on, then the "aesthetic" of the graphic, which will be based on our x and y variables from our regression. We then specify the first layer, which is a series of points defined by the intersection of the x and y variables. 
+
+
+```{r}
+
+g1<-ggplot(data=els,
+           aes(x=byses1,y=bynels2m)
+           )
+
+g1<-g1+geom_point(alpha=.5,size=.25) # Add points at x and y
+g1
+```
+
+So, this is a bit of a mess. It just looks like a blob. We need to fix it to make it more readable, but let's first get the next element we want, which is the regression line. 
+
+```{r}
+g1<-g1+geom_smooth(method="lm")
+g1<-g1+geom_smooth(method = "loess",color="red")
+g1<-g1+geom_smooth(color="orange")
+g1<-g1+ylab("Math Test Scores")+xlab("Socio Economic Status")
+g1
+```
+
+
+## Using Conditional Means to Create Scatterplots
+
+It's also really hard to see. We can use conditional means to help out with that problem. Let's get the average amount of test scores at every percentile level of `byses1`.  Notice the use of `round` to get income percentiles that are at two digits only. 
+
+```{r}
+
+els_sum<-els%>%
+  mutate(ses_rank=percent_rank(byses1)*100)%>%
+  mutate(ses_rank_r=round(ses_rank))%>%
+  group_by(ses_rank_r)%>%
+  dplyr::summarize(test_mean=mean(bynels2m,na.omit=TRUE))
+
+g1a<-ggplot(els_sum,aes(x=ses_rank_r,y=test_mean))
+
+g1a<-g1a+geom_point()
+
+g1a<-g1a+ylab("Test Scores")+xlab("SES Rank")
+
+g1a
+
+```
+
+
+Better! Simplifying data can help. 
+
+We can add a regression line to this simpler data
+
+```{r}
+g1b<-g1a+geom_smooth(method="lm") # Add a line
+g1b
+```
+
+This summarizes the basic relationship nicely. We're ready to run the model and get results. 
+
+```{r}
+#First model
+
+mod_1<-lm(bynels2m~byses1,data=els);summary(mod_1)
+
+```
+
+_Quick Exercise_ Create a similar graphic, but this time use reading scores as the independent variable.  
+
+## Presenting Complex Results
+
+The next step is to add covariates. I'll be working with the variable `bypared` which is a factor that summarizes the parental education of respondents. I'm going to set the color of the markers by the `bypared` factor. 
+
+```{r}
+g2<-ggplot(data=filter(els,is.na(bypared)==FALSE),
+            aes(x=byses1,y=bynels2m,
+                color=as.factor(bypared) #notice the color option
+                ))
+## Let's make the dots smaller for readability
+g2<-g2+geom_point(size=.25)
+
+## Changing the Legend
+g2<-g2+theme(legend.position="bottom"  )#, legend.title = 
+              # element_blank())
+
+g2<-g2+ylab("Test Scores")+xlab("Socio Economic Status")
+
+g2 <- g2+ scale_color_discrete(name="parental Ed")
+
+```
+
+Our  graphic is a bit complex, but shows the intersectionality between SES and parental education: there are very few students with low levels of parental education and/or high levels of SES or test scores.  
+
+We can see this same relationship in the model results: 
+
+
+## Using Scatterplots to Explain Models
+```{r}
+
+#Model 2: with parental education
+
+mod_2<-lm(bynels2m~
+            byses1+
+            as.factor(bypared),
+          data=els); summary(mod_2)
+
+```
+
+Now let's take a look at this model plotted against the actual data. I'm going to use the `alpha` setting to make the dots more transparent. I'm also going to make the dots smaller via the size specification. 
+```{r}
+
+els<-els%>%add_predictions(mod_2)%>%dplyr::rename(pred_mod_2=pred)
+
+g3<-ggplot(els,aes(x=byses1,y=bynels2m))
+g3<-g3+geom_point(alpha=.2,size=.25)
+
+g3<-g3+geom_smooth(data=els,(aes(x=byses1,y=pred_mod_2)))
+
+g3<-g3+xlab("Socio Economic Status")+ylab("Test Scores")
+
+g3
+```
+
+
+
+As we add more variables to the model, it can get more difficult to plot relationships. One very good option is to plot lines based on a hypothetical set of data. Below, I create a hypothetical set of data that include values of SES across the range of SES, and includes values for every level of `bypared`. I then run predictions from this hypothetical data to get a prediction line for every level of parental education. 
+
+
+Now, using my estimates from model 2, I predict what would happen to these hypothetical individuals.  Once I've got my prediction, I transform it back out of the log scale into the "response" level of dollars. 
+
+```{r}
+
+hypo_data<-data_grid(els, byses1 = seq_range(byses1,n=100),bypared)  %>% add_predictions(mod_2)
+```
+
+
+Now we can plot the result, using the `geom_smooth` layer to give us lines for every level of `childage`. 
+
+
+```{r}
+g4<-ggplot(data=hypo_data,
+           aes(x=byses1,
+               y=pred,
+               color=fct_reorder(.f=as.factor(bypared),pred))) #notice color
+g4<-g4+geom_smooth(method=lm,se=FALSE)
+g4<-g4+theme(legend.position="bottom",legend.title = element_blank())
+g4<-g4+xlab("Income Rank")+ylab("Math Test Scores")
+g4
+```
+
+
+To show this in the data we can break it out for every type of parental education. 
+
+```{r}
+## Resort Parental Education for graphic
+#els<-els%>%mutate(bypared = factor(bypared))
+els<-els%>%mutate(bypared=reorder(x=bypared,bynels2m))
+# filter nas!
+g5<-ggplot(filter(els, is.na(bypared) == FALSE),aes(x=byses1,y=bynels2m, color=as.factor(bypared)))
+g5<-g5+geom_point(alpha=.5,size=.1)
+g5<-g5+geom_smooth(method="lm",color="black")
+g5<-g5+facet_wrap(~as.factor(bypared),nrow=2)
+g5<-g5+xlab("SES")+ylab("Test Scores")
+g5<-g5+theme(legend.position="none") #Suppress legend, not needed
+
+g5
+
+```
+
+
+
+
+
+
+
+
+
+# Classification
+
+Classification is the process of predicting group membership. Understanding which individuals are likely to be members of which groups is a key task for data scientists. For instance, most recommendation engines that are at the hear of consumer web sites are based on classification algorithms, predicting which consumers are likely to purchase which products. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Pizza
+
+Today we'll be working with the pizza dataset, which comes from the subreddit random acts of pizza. Each line represents a post to this subreddit. We have various characteristics of these posts, along with the request text from the post itself. We'll use these characteristics of the posts to predict whether or not the poster received pizza. This lesson is inspired by [this article](http://www.aaai.org/ocs/index.php/ICWSM/ICWSM14/paper/download/8106/8101)
+
+```{r libraries}
+library(knitr)
+library(caret)
+
+```
+
+```{r data}
+load("za_train.RData")
+```
+
+ Our goal is to create a classifier that will accurately classify people in a testing dataset as to whether they will receive a pizza or not, based on the content of their post. This is a VERY common task in data science-- taking user supplied content and using it to accurately classify that user, typically as someone who will buy a product or service.   
+ 
+ ## Dependent Variable
+ 
+ Our dependent variable is a binary variable, `got_pizza` that denotes whether the user indicated that someone had sent them a pizza after posting in the subreddit "random acts of pizza". Let's take a look at this and see how many people posted that they got a pizza.
+ 
+```{r}
+table(za_train$got_pizza)
+```
+
+This tells us the raw numbers. Lots of times we want to know the proportions. The function `prop.table` can do this for us. 
+
+```{r}
+prop.table(table(za_train$got_pizza))
+```
+ 
+So, `r  prop.table(table(za_train$got_pizza))[2]` of posts indicate that they were sent a pizza as a result of their post. We're interested in taking information in the posts themselves to see what makes it more or less likely that they would indicate that they received a pizza. 
+ 
+
+## Conditional Means as a Classifier
+
+We'll start by generating some cross tabs and some quick plots, showing the probability of receiving pizza according to several characteristics of the post.  We start with a basic crosstab of the dependent variable. We use `prop.table` to change this from raw counts to proportions. I also provide a brief exampl of how to do a table using the `kable` function. 
+
+```{r descriptives}
+#Cross Tabs
+
+za_train%>%
+  dplyr::count(got_pizza)%>% # Count numbers getting pizza
+  mutate(p=prop.table(n))%>% #mutate for proportions using prop.table
+  kable(format="markdown") # output to table
+
+```
+
+So, about 75% of the sample didn't get pizza, about 25% did. 
+
+Next, we cross-tabulate receiving pizza with certain terms. First, if the request mentioned the word "student."
+
+```{r}
+prop.table(table(za_train$student,za_train$got_pizza),margin=1)
+```
+
+Next, if the request mentioned the word "grateful."
+
+```{r}
+g_table<-table(za_train$grateful,za_train$got_pizza);g_table
+
+prop.table(g_table,margin=1)
+```
+
+Crosstabs using binary data are equivalent to generating conditional means, as shown below. 
+
+```{r condtional_means}
+#Predictions using conditional means
+
+za_train%>%group_by(grateful)%>%dplyr::summarize(mean(got_pizza))
+
+```
+
+Note how the mean of got pizza is equivalent to the proportion answering "1" in the previous table. 
+
+But, we can also use conditional means to get proportions for very particular sets of characteristics. In this case, what about individuals who included some combination of the terms "grateful","student" and "poor" in their posts? 
+
+```{r}
+za_sum<-za_train%>%
+  group_by(grateful,student,poor)%>%
+  dplyr::summarize(mean_pizza=mean(got_pizza))%>%
+  arrange(-mean_pizza)
+
+za_sum%>%kable()
+
+```
+
+The initial evidence here makes it look like the posts that included the terms "Grateful" and "student" had the highest probability of receiving a pizza (or at least posting that they received a pizza!).
+
+## Probability of Receiving Pizza, Using Various Terms in Post
+```{r}
+gg<-ggplot(za_sum,aes(x=grateful,y=mean_pizza,fill=grateful))
+gg<-gg+geom_bar(stat="identity")
+gg<-gg+facet_wrap(~student+poor)
+gg
+```
+
+## Classification Using Linear Probability Model
+
+We can use standard OLS regression for classification. It's not ideal, but most of the time it's actually not too bad, either. Below we model the binary outcome of receiving pizza as a function of karma, total posts, posts on the pizza subreddit, whether or not the poster mentioned the words "student" or "grateful."
+
+```{r linear_model}
+# Linear model
+lm_mod<-lm(got_pizza~
+             karma+
+             total_posts+
+             raop_posts+
+             student+
+             grateful,
+           data=za_train,y=TRUE,na.exclude=TRUE);summary(lm_mod)
+```
+
+We're going to do something a bit different with the predictions from this model. After creating predictions, we're going to classify everyone with a predicted probablity above .5 as being predicted to get a pizza, while everyone with a predicted probability below .5 is predicted to not get one. We'll compare our classifications with the actual data. 
+
+```{r}
+#Predictions
+za_train<-za_train%>%
+  add_predictions(lm_mod)%>% ## Add in predictions from the model
+  dplyr::rename(pred_lm=pred)%>% ## rename to be predictions from ols (lm)
+  mutate(pred_lm_out=ifelse(pred_lm>=.35,1,0))
+```
+
+Let's create a table that shows the predictions of our model against what actually happened
+```{r}
+pred_table<-table(za_train$got_pizza,za_train$pred_lm_out)
+
+pred_table
+
+prop.table(pred_table)
+rownames(pred_table)<-c("Predicted 0","Predicted 1")
+colnames(pred_table)<-c("Actually 0","Actually 1")
+```
+
+```{r}
+ModelMetrics::confusionMatrix(za_train$got_pizza,za_train$pred_lm_out)
+caret::confusionMatrix(as.factor(za_train$got_pizza),as.factor(za_train$pred_lm_out))
+```
+
+
+The confusion matrix generated here is explained [here](https://topepo.github.io/caret/measuring-performance.html#class). 
+
+We're usually interested in three things: the overall accuracy of a classification is the proportion of cases accurately classified. The sensitivity is the proportion of "ones" that are accurately classified as ones-- it's the probability that a case classified as positive will indeed be positive. Specificity is the probability that a case classified as 0 will indeed by classified as 0. 
+
+*Question: how do you get perfect specificity? How do you get 
+perfect sensitivity?*
+
+There are several well-known problems with linear regression as a classification algortihm. Two should give us pause: it can generate probabilites outside of 0,1 and it implies a linear change in probabilities as a function of the predictors which may not be justified given the underlying relationship between the predictors and the probability that the outcome is 1. Logistic regresssion should give a better predicted probability, one that's more sensitive to the actual relationship between the predictors and the outcome. 
+
+## Logistic regression as a classifier
+
+Logistic regression is set up to handle binary outcomes as the dependent variable. In particular, the predictions will always be a probability, which makes it better than the ironically named linear probability model. The downside to logistic regression is that it is modeling the log odds of the outcome, which means all of the coefficients are expressed as log odds, which no one understands intuitively. In this class, we're going to concentrate on logistic regression's ability to produce probabilities as predictions. Below I run the same model using logistic regression. Note the use of `glm` and the `family` option, which specifies a functional form and a particular link function. 
+
+```{r}
+#Logisitic model
+
+logit_mod<-glm(got_pizza~
+             karma+
+             total_posts+
+             raop_posts+
+             student+
+             grateful,
+             data=za_train,
+            na.action=na.exclude,
+            family=binomial(link="logit"),
+               y=TRUE)
+
+summary(logit_mod)
+```
+
+With these results in hand we can generate predicted probabilities and see if this model did any better. To get predicted probabilities, we need to specify `type=response` in our prediction call. 
+
+```{r}
+za_train<-za_train%>%
+  mutate(pred_logit=predict(logit_mod,type="response"))
+```
+
+We can convert the predictions to a binary variable by setting a "threshold" of .5. Any prediction above .5 is considered to be a 1, anything below, a 0. 
+```{r}
+
+
+za_train<-za_train%>%
+    mutate(pred_logit_out=ifelse(pred_logit>=.45,1,0))
+
+za_train<-za_train%>%
+    mutate(pred_logit_out=as.factor(pred_logit_out))
+
+za_train<-za_train%>%
+    mutate(got_pizza=as.factor(got_pizza))
+```
+
+Now we create a confusion matrix to see how we did. 
+```{r}
+confusionMatrix(data=as.factor(za_train$pred_logit_out),reference=as.factor(za_train$got_pizza))
+```
+
+## Applying predictions to the testing dataset.
+
+With our new (not very good) classifier, we can now add predictions to the testing dataset, and see how good this classifier is at predicting out of sample information. 
+
+```{r}
+load("za_test.RData")
+
+za_test<-za_test%>%
+  mutate(pred_logit=predict(logit_mod,newdata=.,type="response"))%>%
+      mutate(pred_logit_out=ifelse(pred_logit>=.45,1,0))
+
+za_test<-za_test%>%
+    mutate(pred_logit_out=as.factor(pred_logit_out))
+
+za_test<-za_test%>%
+    mutate(got_pizza=as.factor(got_pizza))
+
+
+confusionMatrix(data=za_test$pred_logit_out,reference=za_test$got_pizza)
+```
+
+## Thinking about classifiers
+
+First, make sure that your dependent variable really is binary. If you're working with a continuous variable (say, income) don't turn it into a binary variable (e.g. low income). 
+
+Second, remember that classifiers must always balance sensitivity and specificity. Don't be overly impressed by a high overall percent correctly predicted, nor a high level of either specificity or sensitivity. Instead, look for classifiers that have both. 
