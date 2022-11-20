@@ -1,0 +1,137 @@
+---
+title: "Naive Bayes and k-fold crossvalidation"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, results ='show',include=TRUE,messages=FALSE)
+#install.packages("e1071")
+#install.packages("naivebayes")
+library(e1071)
+library(naivebayes)
+
+```
+#Introduction 
+
+This tutorial will use a heart risk dataset. First we load the data set and briefly inspect it. Note: that it contains both qual and quant data.
+
+```{r }
+#setwd("C:\\Users\\jerem\\Google Drive\\Online\\iCuse\\IST707\\Week7")
+
+filename="LabeledDataRiskHeart.csv"
+RiskDF <- read.csv(filename, header = TRUE, stringsAsFactors = TRUE)
+(head(RiskDF))
+(str(RiskDF))
+(nrow(RiskDF))
+RiskDF$StressLevel<-as.factor(RiskDF$StressLevel)
+RiskDF$Cholesterol<-as.numeric(RiskDF$Cholesterol)
+RiskDF$Weight<-as.numeric(RiskDF$Weight)
+RiskDF$Height<-as.numeric(RiskDF$Height)
+(str(RiskDF))
+
+```
+
+# Crossvalidation
+
+Next we set up or experimental evaluation. We will use k-fold crossvalidation. The split function helps to facilitate the partitioning of the data set which determines the k folds. 
+
+```{r }
+
+###############################################################
+#############  Create k-folds for k-fold validation ###########
+###############################################################
+
+
+# Number of observations
+N <- nrow(RiskDF)
+# Number of desired splits
+kfolds <- 2
+# Generate indices of holdout observations
+# Note if N is not a multiple of folds you will get a warning, but is OK.
+holdout <- split(sample(1:N), 1:kfolds)
+```
+
+
+# Experimental Validation
+
+Running k-fold crossvalidation requires that we run k trials. This is facilitated using a for loop that iterates k times. During each iteration,  k-1 partition are assigned to the training set and the remaining partition is the test set. 
+
+## Naive Bayes
+
+During each iteration a Naive Bayes model is trained and tested using naiveBayes and predict, respectively.
+
+```{r }
+
+#####  Run training and Testing for each of the k-folds
+AllResults<-list()
+AllLabels<-list()
+for (k in 1:kfolds){
+  
+  RiskDF_Test=RiskDF[holdout[[k]], ]
+  RiskDF_Train=RiskDF[-holdout[[k]], ]
+  ## View the created Test and Train sets
+  (head(RiskDF_Train))
+  (table(RiskDF_Test$Label))
+  
+  ## Make sure you take the labels out of the testing data
+  (head(RiskDF_Test))
+  RiskDF_Test_noLabel<-RiskDF_Test[-c(1)]
+  RiskDF_Test_justLabel<-RiskDF_Test$Label
+  (head(RiskDF_Test_noLabel))
+  
+  
+  #### e1071
+  ## formula is label ~ x1 + x2 + .  NOTE that label ~. is "use all to create model"
+  NB_e1071<-naiveBayes(Label~., data=RiskDF_Train, na.action = na.pass)
+  NB_e1071_Pred <- predict(NB_e1071, RiskDF_Test_noLabel)
+  NB_e1071
+  
+  ## Accumulate results from each fold
+  AllResults<- c(AllResults,NB_e1071_Pred)
+  AllLabels<- c(AllLabels, RiskDF_Test_justLabel)
+  
+}
+
+```
+
+# Results
+Results are presented in tabular form below. You can easily create a confusion matrix from this data -- try it!
+
+```{r }
+
+### end crossvalidation -- present results for all folds   
+table(unlist(AllResults),unlist(AllLabels))
+```
+
+
+# Another NB library
+
+Below is another NB package you can try. It is similar but also has some fun visualizations.
+
+Laplace Modeling. Try varying the laplace parameter ... what happens? Review the PPT to determine why and explain your results.
+
+```{r}
+
+## using naivebayes package
+## https://cran.r-project.org/web/packages/naivebayes/naivebayes.pdf
+
+##Also see
+##https://www.rdocumentation.org/packages/naivebayes/versions/0.9.2/topics/naive_bayes
+## Try varying the Laplace value ... how does this affect the results???
+
+
+#prior <- as.vector(c(0, .4, .6) )
+
+NB_object<- naive_bayes(Label~., laplace = 1 , data=RiskDF_Train)
+NB_prediction<-predict(NB_object, RiskDF_Test_noLabel , type = c("class"))
+head(predict(NB_object, RiskDF_Test_noLabel, type = "prob"))
+table(NB_prediction,RiskDF_Test_justLabel)
+plot(NB_object, legend.box = TRUE)
+```
+
+
