@@ -1,0 +1,201 @@
+---
+title: "caretPipeline"
+output: html_document
+date: "2024-08-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Test pipeline from caret
+
+## Notes
+
+- In this markdown file, we provide an example of the 'pipeline' capabilities in the caret package
+
+- It allows for easy step-by-step processing of data. EG Scale the data, perform PCA, Train a classifier, Find optimal parameters via tune, present crossvalidation results. 
+
+- this is all done with minimal coding (only a few lines)
+
+
+## Load Packages
+
+```{r}
+# Load necessary libraries
+library(caret)
+library(e1071)  # Required for SVM
+library(pROC)   # For computing AUC
+
+# Set a random seed for reproducibility
+set.seed(123)
+```
+
+
+## Load Data
+
+```{r}
+
+
+# Load or simulate your data (here's an example with the iris dataset)
+# Note: Ensure your outcome is a binary factor for AUC calculation
+data(iris)
+iris$Species <- ifelse(iris$Species == "setosa", "setosa", "other")
+iris$Species <- as.factor(iris$Species)
+
+```
+
+## Set parameters for preprocessing 
+
+
+Common Preprocessing Options in caret:
+Centering and Scaling:
+
+center: Subtracts the mean from each predictor, making the mean of the predictors zero.
+
+scale: Divides each predictor by its standard deviation, making the predictors have a standard deviation of one.
+
+Box-Cox Transformation:
+
+BoxCox: Applies a Box-Cox power transformation to make the data more normally distributed.
+
+Yeo-Johnson Transformation:
+
+YeoJohnson: Similar to Box-Cox but can handle zero and negative values.
+
+Imputation:
+
+knnImpute: Imputes missing values using k-nearest neighbors.
+bagImpute: Imputes missing values using a bagged tree model.
+medianImpute: Imputes missing values by replacing them with the median.
+
+Principal Component Analysis (PCA):
+
+pca: Transforms the predictors into principal components. Useful for dimensionality reduction.
+
+Independent Component Analysis (ICA):
+
+ica: Performs Independent Component Analysis, another method for dimensionality reduction.
+
+ZCA Whitening:
+
+zca: Applies Zero-phase Component Analysis (ZCA) whitening, which decorrelates the data.
+
+Spatial Sign Transformation:
+
+spatialSign: Transforms the data to unit length while retaining the direction of the data.
+
+Range Transformation:
+
+range: Rescales the data to a specified range, typically [0, 1].
+
+Correlation Filtering:
+
+corr: Removes highly correlated features based on a specified correlation threshold.
+
+Variance Thresholding:
+
+nzv: Removes predictors with near-zero variance, which are not likely to be useful in modeling.
+
+Discretization:
+
+discretize: Converts continuous variables into categorical ones by binning.
+
+Box-Tidwell Transformation:
+
+BoxTidwell: Tests for and transforms nonlinear relationships between predictors and the outcome.
+
+```{r}
+
+
+# Define the preprocessing steps: centering, scaling, and PCA
+preprocess_params <- preProcess(iris[, -5], method = c("center", "scale", "pca"))
+
+# Apply the preprocessing steps to the data
+transformed_data <- predict(preprocess_params, iris[, -5])
+
+```
+
+### Create Training Data
+
+Since the caret package will perform crossvalidation for us, we create one training set and one (final) validation set. 
+
+```{r}
+
+trainIndex <- createDataPartition(iris$Species, p = .8, list = FALSE, times = 1)
+trainData <- transformed_data[trainIndex, ]
+testData <- transformed_data[-trainIndex, ]
+testSpecies <- iris[-trainIndex,]$Species
+
+# Combine the preprocessed data with the outcome variable
+training_data <- data.frame(trainData, Species = iris[trainIndex,]$Species)
+
+# Define the control for the training process with AUC as the performance metric
+train_control <- trainControl(
+  method = "cv",                # Cross-validation
+  number = 10,                  # 10-fold cross-validation
+  summaryFunction = twoClassSummary,  # Use AUC as the performance metric
+  classProbs = TRUE,            # Required for AUC
+  verboseIter = TRUE            # Show training progress
+)
+
+```
+
+## Tuning
+
+Next we set tuning parameters to search for best parameter settings during crossvalidation. Here we use a RadialBasis SVM, so we tune parameters C (cost) and sigma (radial param). ... Try different cost values and get better results :)
+
+You can also change the performance metric, classifier, etc.
+
+```{r}
+# Define the grid of parameters to tune: kernel and cost
+tune_grid <- expand.grid(
+  
+  # These are bad cost values ... try some closer to 1 to improve results :)
+  C = 2^(-50:1:-47),#Cost parameter values
+  
+  sigma = c(0.01, 0.05, 0.1, 0.5, 1)# sigma parameter for RBF kernel
+)
+
+# Train the SVM model using the preprocessed data and tuning the parameters
+svm_model <- train(
+  Species ~ ., 
+  data = training_data, 
+  method = "svmRadial",           # SVM method (svmRadial is used for radial kernel)
+  preProcess = NULL,              # Preprocessing already done
+  tuneGrid = tune_grid,           # Parameter grid
+  metric = "ROC",                 # Optimize for AUC
+  trControl = train_control
+)
+
+```
+
+## 10-fold crossvalidation AUC results for each parameter combo (via tune)
+
+```{r}
+
+# Output the best model and its parameters
+#print(svm_model)
+
+# Plot the performance of different parameter combinations
+plot(svm_model)
+
+# Make predictions on new data (if available)
+# new_data <- predict(preprocess_params, new_data_to_predict)
+# predictions <- predict(svm_model, new_data)
+```
+
+
+## Results for a Holdout Set (Validation Set)
+
+```{r}
+predictions <- predict(svm_model, newdata = testData, type = "prob")
+
+
+roc_curve <- roc(testSpecies, predictions$setosa, levels = rev(levels(testSpecies)))
+
+# Plot the ROC curve
+plot(roc_curve, col = "blue", main = "ROC Curve for SVM Model on Validation Set")
+
+```
+
